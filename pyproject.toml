@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=58", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "papis-qa"
+authors = [{ name = "Isak Samsten", email = "isak@samsten.se" }]
+readme = "README.md"
+description = "QA for Papis"
+dynamic = ["version"]
+license = { text = "BSD-3-Clause" }
+dependencies = ["papis==0.13", "paper-qa==4.7.0", "pymupdf"]
+classifiers = [
+    'License :: OSI Approved :: BSD License',
+    'Operating System :: MacOS',
+    'Operating System :: POSIX :: Linux',
+    'Operating System :: POSIX',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+]
+
+[tool.setuptools_scm]
+write_to = "papisqa/version.py"
+
+[tool.setuptools.dynamic]
+version = { attr = "papisqa.__version__" }
+
+[project.entry-points."papis.command"]
+"ai" = "papisqa._main:main"
