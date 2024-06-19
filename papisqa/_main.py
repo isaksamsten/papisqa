@@ -48,29 +48,6 @@ def save_index(docs):
         pickle.dump(docs, f)
 
 
-def get_already_indexed_file():
-    return (
-        Path(papis.config.get_config_home())
-        / "papis"
-        / "{}.hist".format(papis.config.get_lib().name)
-    )
-
-
-def get_already_indexed():
-    file = get_already_indexed_file()
-
-    if file.exists():
-        with open(file, "rb") as f:
-            return pickle.load(f)
-    else:
-        return set()
-
-
-def save_already_indexed(alread_indexed):
-    with open(get_already_indexed_file(), "wb") as f:
-        pickle.dump(alread_indexed, f)
-
-
 @click.group("ai")
 @click.help_option("-h", "--help")
 def main():
@@ -78,23 +55,19 @@ def main():
 
 
 @main.command("index")
+@papis.cli.query_argument()
 @click.option("--force", help="Regenerate index", is_flag=True, default=False)
-def index(force):
+def index(query, force):
     docs = get_index()
     if docs is None or force:
         docs = Docs(llm="gpt-4o", embedding="text-embedding-3-small")
 
-    alread_indexed = get_already_indexed()
-    if force:
-        alread_indexed = set()
-
-    documents = papis.cli.handle_doc_folder_or_query(".", None)
+    documents = papis.cli.handle_doc_folder_or_query(query, None)
     documents = [
         (doc, file)
         for doc in documents
         for file in doc.get_files()
-        if doc["papis_id"] + file not in alread_indexed
-        and os.path.splitext(file)[1] == ".pdf"
+        if os.path.splitext(file)[1] == ".pdf"
     ]
     counter = 1
     for doc, file in documents:
@@ -103,35 +76,45 @@ def index(force):
             ref = doc["papis_id"]
 
         title = doc["title"]
-        author = doc["author"]
         year = doc["year"]
         docname = doc["papis_id"]
         authors = doc["author_list"]
-        if len(authors) > 0:
+        if (
+            len(authors) > 0
+            and year is not None
+            and title is not None
+            and title.strip() != ""
+        ):
+            author1 = authors[0].get("family")
             if len(authors) == 1:
-                docname = "{}, {}".format(authors[0].get("family", "Unknown"), year)
+                author = author1
             elif len(authors) == 2:
-                docname = "{} and {}, {}".format(
-                    authors[0].get("family", "Unknown"),
-                    authors[1].get("family", "Unknown"),
-                    year,
-                )
+                author2 = authors[1].get("family")
+                if author2 is not None:
+                    author = "{} and {}".format(author1, author2)
+                else:
+                    author = author1
             else:
-                docname = "{} et al., {}".format(
-                    authors[0].get("family", "Unknown"), year
-                )
-        else:
-            docname = f"Unknown, {year}"
+                if author1 is not None:
+                    author = "{} et al.".format(author1)
+                else:
+                    author = None
 
-        logger.info(
-            "%d/%d: Indexing %s (%s)...", counter, len(documents), docname, file
-        )
-        docs.add(Path(file), citation=ref, docname=docname)
-        alread_indexed.add(doc["papis_id"] + file)
+            if author is None or author1 is None:
+                continue
+
+            docname = f"{author}, {title} ({year})"
+        else:
+            logger.warning("Skipping...")
+            continue
+
+        if docs.add(Path(file), citation=ref, docname=docname) is not None:
+            logger.info(
+                "%d/%d: Indexing %s (%s)...", counter, len(documents), docname, file
+            )
         counter += 1
 
     save_index(docs)
-    save_already_indexed(alread_indexed)
 
 
 @main.command("ask")
@@ -145,13 +128,9 @@ def ask(query, top_k, max_sources, show_context, show_excerpt):
         logger.error("top_k must be larger than max_source")
         return
 
-    alread_indexed = get_already_indexed()
     docs = get_index()
 
     if docs is not None:
-        if alread_indexed is not None and len(docs.docs) > len(alread_indexed):
-            logger.info("Some documents are not indexed")
-
         answer = docs.query(query, k=top_k, max_sources=max_sources)
         print("# Question")
         print(f"{answer.question}")
