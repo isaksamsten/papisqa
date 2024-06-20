@@ -131,15 +131,16 @@ def index(query, force):
 
                 # And the author, title year
                 if docs_doc.docname != docname:
-                    logger.info(
-                        "Updating docname for %s, with %s", docs_doc.docname, docname
-                    )
                     # Trying to keep everything in sync...
                     try:
                         docs.docnames.remove(docs_doc.docname)
                     except:
-                        pass
+                        logger.error("Failed to remove the name %s", docs_doc.docname)
+
                     docname = docs._get_unique_name(docname)
+                    logger.info(
+                        "Updating docname for %s, with %s", docs_doc.docname, docname
+                    )
                     for text in docs.texts:
                         if docs_doc.docname in text.name:
                             text_name = text.name
