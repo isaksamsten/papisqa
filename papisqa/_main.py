@@ -7,6 +7,7 @@ import papis.cli
 import papis.config
 
 from paperqa import Docs
+from paperqa.utils import md5sum
 from pathlib import Path
 
 logger = papis.logging.get_logger(__name__)
@@ -62,15 +63,15 @@ def index(query, force):
     if docs is None or force:
         docs = Docs(llm="gpt-4o", embedding="text-embedding-3-small")
 
-    documents = papis.cli.handle_doc_folder_or_query(query, None)
     documents = [
-        (doc, file)
-        for doc in documents
+        (doc, file, md5sum(file))
+        for doc in papis.cli.handle_doc_folder_or_query(query, None)
         for file in doc.get_files()
         if os.path.splitext(file)[1] == ".pdf"
     ]
-    counter = 1
-    for doc, file in documents:
+    counter = 0
+    for doc, file, dockey in documents:
+        counter += 1
         ref = doc["ref"]
         if ref.strip() == "":
             ref = doc["papis_id"]
@@ -105,15 +106,57 @@ def index(query, force):
 
             docname = f"{author}, {title} ({year})"
         else:
-            logger.warning("Skipping...")
+            logger.warning("Skipping %s since author, year or title is missing...", ref)
             continue
 
-        if docs.add(Path(file), citation=ref, docname=docname) is not None:
+        file_path = Path(file)
+        if (
+            docs.add(file_path, dockey=dockey, citation=ref, docname=docname)
+            is not None
+        ):
             logger.info(
                 "%d/%d: Indexing %s (%s)...", counter, len(documents), docname, file
             )
-        counter += 1
+        else:
+            # The document has already been indexed.
+            docs_doc = docs.docs.get(dockey, None)
+            if docs_doc is not None:
+                # The reference might have changed!
+                if docs_doc.citation != ref:
+                    logger.info(
+                        "Updating citation for %s, with %s", docs_doc.citation, ref
+                    )
 
+                    docs_doc.citation = ref
+
+                # And the author, title year
+                if docs_doc.docname != docname:
+                    logger.info(
+                        "Updating docname for %s, with %s", docs_doc.docname, docname
+                    )
+                    # Trying to keep everything in sync...
+                    try:
+                        docs.docnames.remove(docs_doc.docname)
+                    except:
+                        pass
+                    docname = docs._get_unique_name(docname)
+                    for text in docs.texts:
+                        if docs_doc.docname in text.name:
+                            text_name = text.name
+                            text.name = text.name.replace(docs_doc.docname, docname)
+
+                    docs.docnames.add(docname)
+                    docs_doc.docname = docname
+
+    # Documents that have been indexed but are no longer in
+    # the library..
+    dockeys = set(dockey for (_, _, dockey) in documents)
+    dockeys_to_remove = [dockey for dockey in docs.docs.keys() if dockey not in dockeys]
+    for dockey in dockeys_to_remove:
+        logger.info("Removing %s", dockey)
+        docs.delete(dockey=dockey)
+
+    # Pickle the index
     save_index(docs)
 
 
